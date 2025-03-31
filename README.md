@@ -7,8 +7,9 @@ This program acts as a relay between a printing application and a physical print
 ## Features
 
 *   Relays print data from an application to a specified printer IP address.
-*   Logs raw communication data to binary files in the `printer_data` directory.
-*   Logs connection and status information to text files in the `printer_logs` directory.
+*   Logs raw communication data to binary files in the `printer_data` directory, named based on timestamp and client connection (e.g., `data_YYYY-MM-DD_HH_MM_SS_ms_IP_Port.bin`).
+*   Logs connection, status, and data relay information to hourly text files in the `printer_logs` directory.
+*   **Log Rotation:** Log files are created hourly with the format `printer_log_YYYY-MM-DD_HH.log`. The program automatically manages these files, keeping the most recent 720 hourly logs (approximately 30 days) and deleting older ones to prevent excessive disk usage.
 
 ## Setup
 
