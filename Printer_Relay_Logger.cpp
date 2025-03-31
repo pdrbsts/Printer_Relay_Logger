@@ -10,7 +10,7 @@
 #include <windows.h> // For GetLocalTime, CreateDirectory, MoveFileEx etc. (if not using filesystem)
 
 #include <iostream>
-#include <fstream>
+#include <fstream> // For file input
 #include <string>
 #include <vector>
 #include <thread>
@@ -22,17 +22,19 @@
 #include <sstream>
 #include <cstdlib> // For std::exit, std::atoi
 #include <cstdio> // For sprintf_s
-#include <algorithm> // For std::replace, std::remove
-
+#include <algorithm> // For std::replace, std::remove, std::isspace
+#include <sstream> // For string manipulation
 
 // Link with Ws2_32.lib
 #pragma comment(lib, "Ws2_32.lib")
 
 // --- Configuration ---
-const char* LOCAL_HOST = "127.0.0.1";
-const char* LOCAL_PORT_STR = "9100";
-std::string g_relay_host; // MUST be provided via command line argument
-const char* RELAY_PORT_STR = "9100";
+const std::string INI_FILENAME = "Printer_Relay_Logger.ini";
+// Default values, can be overridden by INI or command line
+std::string g_local_host = "127.0.0.1";
+std::string g_local_port_str = "9100";
+std::string g_relay_host; // MUST be provided via INI or command line argument
+std::string g_relay_port_str = "9100";
 
 const std::string LOG_DIRECTORY = "printer_logs";
 const std::string LOG_FILENAME_PREFIX = "printer_log_"; // Prefix for log files
@@ -56,6 +58,66 @@ std::atomic<bool> g_shutdown_requested = false;
 // --- End Global Logging Variables ---
 
 // --- Helper Functions ---
+
+// Trim leading/trailing whitespace from a string
+std::string trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\n\r\f\v");
+    if (std::string::npos == first) {
+        return str;
+    }
+    size_t last = str.find_last_not_of(" \t\n\r\f\v");
+    return str.substr(first, (last - first + 1));
+}
+
+// Parse the INI file
+bool ParseIniFile(const std::string& filename,
+                  std::string& local_host,
+                  std::string& local_port,
+                  std::string& relay_host,
+                  std::string& relay_port)
+{
+    std::ifstream ini_file(filename);
+    if (!ini_file.is_open()) {
+        std::cerr << "[INFO] INI file not found or cannot be opened: " << filename << ". Using defaults/command line args." << std::endl;
+        return false;
+    }
+
+    std::cout << "[INFO] Reading configuration from INI file: " << filename << std::endl;
+    std::string line;
+    bool found_config = false;
+    while (std::getline(ini_file, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == ';' || line[0] == '#') {
+            continue; // Skip empty lines and comments
+        }
+
+        size_t equals_pos = line.find('=');
+        if (equals_pos == std::string::npos) {
+            continue; // Skip lines without '='
+        }
+
+        std::string key = trim(line.substr(0, equals_pos));
+        std::string value = trim(line.substr(equals_pos + 1));
+
+        if (key == "LocalHost") {
+            local_host = value;
+            found_config = true;
+        } else if (key == "LocalPort") {
+            local_port = value;
+            found_config = true;
+        } else if (key == "RelayHost") {
+            relay_host = value;
+            found_config = true;
+        } else if (key == "RelayPort") {
+            relay_port = value;
+            found_config = true;
+        }
+    }
+
+    ini_file.close();
+    return found_config; // Return true if at least one setting was potentially read
+}
+
 
 // Get current timestamp as string
 std::string GetTimestamp() {
@@ -389,14 +451,14 @@ void HandleClientThread(SOCKET client_socket, std::string client_addr_str) {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 
-    result = getaddrinfo(g_relay_host.c_str(), RELAY_PORT_STR, &hints, &relay_addr_result);
+    result = getaddrinfo(g_relay_host.c_str(), g_relay_port_str.c_str(), &hints, &relay_addr_result); // Use variables
     if (result != 0) {
         Log(99, log_prefix + "getaddrinfo failed for relay host " + g_relay_host + " with error: " + std::to_string(result));
         closesocket(client_socket);
         return;
     }
 
-    Log(0, log_prefix + "Attempting to connect to Relay " + g_relay_host + ":" + RELAY_PORT_STR + "...");
+    Log(0, log_prefix + "Attempting to connect to Relay " + g_relay_host + ":" + g_relay_port_str + "..."); // Use variables
 
     // Attempt to connect to an address until one succeeds
     for (ptr = relay_addr_result; ptr != nullptr; ptr = ptr->ai_next) {
@@ -422,7 +484,7 @@ void HandleClientThread(SOCKET client_socket, std::string client_addr_str) {
     freeaddrinfo(relay_addr_result); // Free the address info structure
 
     if (relay_socket == INVALID_SOCKET) {
-        Log(99, log_prefix + "Unable to connect to relay server " + g_relay_host + ":" + RELAY_PORT_STR);
+        Log(99, log_prefix + "Unable to connect to relay server " + g_relay_host + ":" + g_relay_port_str); // Use variables
         closesocket(client_socket);
         return;
     }
@@ -475,19 +537,43 @@ void HandleClientThread(SOCKET client_socket, std::string client_addr_str) {
 
 // --- Main Function ---
 int main(int argc, char* argv[]) {
-     // --- Argument Parsing ---
-     if (argc < 2) {
-         std::cerr << "Error: Missing required argument: Relay Host IP address." << std::endl;
-         std::cerr << "Usage: " << (argc > 0 ? argv[0] : "printer_relay_logger_win32") << " <RELAY_HOST_IP>" << std::endl;
-         return 1; // Exit if IP is not provided
-     }
 
-     g_relay_host = argv[1];
-     std::cout << "Using relay host: " << g_relay_host << std::endl;
+    // --- Configuration Loading ---
+    bool config_from_ini = ParseIniFile(INI_FILENAME, g_local_host, g_local_port_str, g_relay_host, g_relay_port_str);
 
-     if (argc > 2) {
-          std::cerr << "Warning: Ignoring extra arguments. Only the first argument (Relay Host IP) is used." << std::endl;
-     }
+    // --- Argument Parsing (Fallback if INI fails or doesn't provide RelayHost) ---
+    if (!config_from_ini || g_relay_host.empty()) {
+        if (config_from_ini) {
+             std::cerr << "[WARN] RelayHost not found in INI file. Checking command line arguments." << std::endl;
+        } else {
+             // Message already printed by ParseIniFile about not finding the file
+        }
+
+        if (argc < 2) {
+            std::cerr << "[ERROR] Missing required argument: Relay Host IP address (required if not set in " << INI_FILENAME << ")." << std::endl;
+            std::cerr << "Usage: " << (argc > 0 ? argv[0] : "printer_relay_logger_win32") << " <RELAY_HOST_IP>" << std::endl;
+            return 1; // Exit if IP is not provided via INI or command line
+        }
+
+        g_relay_host = argv[1]; // Use command line argument for relay host
+        std::cout << "[INFO] Using relay host from command line: " << g_relay_host << std::endl;
+
+        if (argc > 2) {
+             std::cerr << "[WARN] Ignoring extra command line arguments. Only the first argument (Relay Host IP) is used when INI is missing or incomplete." << std::endl;
+        }
+    } else {
+         std::cout << "[INFO] Using configuration loaded from " << INI_FILENAME << std::endl;
+         if (argc > 1) {
+             std::cerr << "[WARN] Ignoring command line arguments because configuration was loaded from " << INI_FILENAME << "." << std::endl;
+         }
+    }
+
+    // Final check if relay host is set
+    if (g_relay_host.empty()) {
+         std::cerr << "[ERROR] Relay Host IP address is not configured. Provide it in " << INI_FILENAME << " or as a command line argument." << std::endl;
+         return 1;
+    }
+
 
     // --- Setup Logging Directory ---
      try {
@@ -522,8 +608,8 @@ int main(int argc, char* argv[]) {
     // Initial Log Startup Messages (using std::cout before full logging is setup)
     std::cout << "==================================================" << std::endl;
     std::cout << "Starting Printer Relay Logger (Win32)" << std::endl;
-    std::cout << "Listening on: " << LOCAL_HOST << ":" << LOCAL_PORT_STR << std::endl;
-    std::cout << "Relaying to: " << g_relay_host << ":" << RELAY_PORT_STR << std::endl;
+    std::cout << "Listening on: " << g_local_host << ":" << g_local_port_str << std::endl; // Use variables
+    std::cout << "Relaying to: " << g_relay_host << ":" << g_relay_port_str << std::endl; // Use variables
     std::cout << "Logging to directory: " << LOG_DIRECTORY << std::endl;
     std::cout << "Log filename format: " << LOG_FILENAME_PREFIX << "<YYYY-MM-DD_HH>" << LOG_FILENAME_SUFFIX << std::endl;
     std::cout << "Keeping " << LOG_BACKUP_COUNT << " backup log files." << std::endl;
@@ -549,7 +635,7 @@ int main(int argc, char* argv[]) {
     hints.ai_flags = AI_PASSIVE; // For wildcard IP address
 
     // Resolve the local address and port to be used by the server
-    result = getaddrinfo(LOCAL_HOST, LOCAL_PORT_STR, &hints, &listen_addr_result);
+    result = getaddrinfo(g_local_host.c_str(), g_local_port_str.c_str(), &hints, &listen_addr_result); // Use variables
     if (result != 0) {
         Log(99, "getaddrinfo for local bind failed with error: " + std::to_string(result));
         WSACleanup();
@@ -585,7 +671,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    Log(0, "Server listening on " + std::string(LOCAL_HOST) + ":" + LOCAL_PORT_STR + ". Press Ctrl+C to stop.");
+    Log(0, "Server listening on " + g_local_host + ":" + g_local_port_str + ". Press Ctrl+C to stop."); // Use variables
 
 
     // --- Accept Client Connections Loop ---
