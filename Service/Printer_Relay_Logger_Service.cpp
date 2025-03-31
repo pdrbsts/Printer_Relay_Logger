@@ -783,8 +783,6 @@ int main(int argc, char* argv[]) {
 
     if (!SetCurrentDirectoryA(g_executable_dir.c_str())) {
          std::cerr << "Failed to set working directory to " << g_executable_dir << ". Error: " << GetLastError() << std::endl;
-    } else {
-         std::cout << "Working directory set to: " << g_executable_dir << std::endl;
     }
 
     SERVICE_TABLE_ENTRYW ServiceTable[] = {
@@ -796,7 +794,7 @@ int main(int argc, char* argv[]) {
         DWORD error = GetLastError();
         if (error == ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) {
             std::cerr << "This program must be run as a Windows service." << std::endl;
-            std::cerr << "Install using: sc create PrinterRelayLogger binPath= \"" << path << "\"" << std::endl;
+            std::cerr << "Install using: sc create PrinterRelayLogger binPath= \"" << path << "\" start= auto" << std::endl;
             std::cerr << "Start using:   sc start PrinterRelayLogger" << std::endl;
             std::cerr << "Stop using:    sc stop PrinterRelayLogger" << std::endl;
             std::cerr << "Delete using:  sc delete PrinterRelayLogger" << std::endl;
