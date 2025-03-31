@@ -27,15 +27,45 @@ Now, when you print to this configured printer, the print job will be sent to `1
 
 ### Relay Program Configuration
 
-The relay program (`Printer_Relay_Logger.exe`) needs to know the actual IP address of your physical printer to forward the data. This is typically hardcoded or configured within the application itself (check the source code, e.g., `Printer_Relay_Logger.cpp`, for how the target printer IP is set).
+The relay program (`Printer_Relay_Logger.exe`) needs to know where to listen for incoming connections and the actual IP address and port of your physical printer to forward the data.
+
+Configuration is primarily handled via the `Printer_Relay_Logger.ini` file located in the same directory as the executable. If this file exists, the program will read the following settings from it:
+
+*   `LocalHost`: The IP address the relay should listen on (default: `127.0.0.1`).
+*   `LocalPort`: The port the relay should listen on (default: `9100`).
+*   `RelayHost`: **(Required)** The IP address of the physical printer to relay data to.
+*   `RelayPort`: The port on the physical printer to connect to (default: `9100`).
+
+**Example `Printer_Relay_Logger.ini`:**
+
+```ini
+LocalHost = 127.0.0.1
+LocalPort = 9100
+RelayHost = 192.168.1.100 ; Replace with your printer's actual IP
+RelayPort = 9100
+```
+
+**Fallback Configuration (Command Line):**
+
+If the `Printer_Relay_Logger.ini` file is not found, or if it does not contain the `RelayHost` setting, the program requires the relay host IP address to be provided as a command-line argument:
+
+```bash
+Printer_Relay_Logger.exe <RELAY_HOST_IP>
+```
+
+Example: `Printer_Relay_Logger.exe 192.168.1.100`
+
+In this fallback mode, the program uses the default `LocalHost` (`127.0.0.1`), `LocalPort` (`9100`), and `RelayPort` (`9100`).
 
 ## Usage
 
-1.  Ensure the printer is configured to send jobs to `127.0.0.1` as described above.
-2.  Make sure the `Printer_Relay_Logger.exe` is configured with the correct target printer IP address.
-3.  Run the executable: `Printer_Relay_Logger.exe` or use `run.bat` if available.
+1.  Ensure the printer is configured to send jobs to the `LocalHost` and `LocalPort` specified in the configuration (default `127.0.0.1:9100`), as described in the "Printer Configuration" section.
+2.  Configure the relay program by creating and editing `Printer_Relay_Logger.ini` with the correct `RelayHost` (your printer's IP). Alternatively, ensure the INI file is absent and you provide the printer's IP as a command-line argument.
+3.  Run the executable:
+    *   If using `Printer_Relay_Logger.ini`: `Printer_Relay_Logger.exe` (or use `run.bat` if available).
+    *   If using command-line argument: `Printer_Relay_Logger.exe <RELAY_HOST_IP>` (e.g., `Printer_Relay_Logger.exe 192.168.1.100`).
 4.  Send a print job from your application to the printer configured in the setup step.
-5.  The relay program will intercept the job, log the data to the `printer_data` and `printer_logs` directories, and forward it to the physical printer.
+5.  The relay program will intercept the job, log the data to the `printer_data` and `printer_logs` directories, and forward it to the physical printer specified by `RelayHost` and `RelayPort`.
 
 ## Compilation
 
